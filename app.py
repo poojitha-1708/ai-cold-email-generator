@@ -26,7 +26,6 @@ load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-# You can change the model from .env if required
 MODEL_NAME = os.getenv(
     "GEMINI_MODEL",
     "gemini-3.1-flash-lite"
@@ -34,6 +33,7 @@ MODEL_NAME = os.getenv(
 
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
+
 
 # ============================================================
 # SESSION STATE
@@ -44,9 +44,6 @@ if "manual_prospects" not in st.session_state:
 
 if "generated_results" not in st.session_state:
     st.session_state.generated_results = []
-
-if "generation_history" not in st.session_state:
-    st.session_state.generation_history = []
 
 
 # ============================================================
@@ -78,27 +75,42 @@ SPAM_TRIGGERS = {
 # HELPER FUNCTIONS
 # ============================================================
 
+def safe_text(value):
+    """Convert empty/NaN values into clean strings."""
+
+    if value is None:
+        return ""
+
+    try:
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
+
+    return str(value).strip()
+
+
 def check_spam(text):
-    """
-    Check email text against a simple static spam-trigger list.
-    This is a heuristic checker, not a complete deliverability engine.
-    """
+    """Check email text against configured spam-trigger words."""
 
     text_lower = text.lower()
-    found = []
+    found_words = []
 
     for trigger in SPAM_TRIGGERS:
 
         if " " in trigger:
+
             if trigger in text_lower:
-                found.append(trigger)
+                found_words.append(trigger)
+
         else:
+
             pattern = r"\b" + re.escape(trigger) + r"\b"
 
             if re.search(pattern, text_lower):
-                found.append(trigger)
+                found_words.append(trigger)
 
-    return found
+    return found_words
 
 
 def get_spam_suggestions(words):
@@ -118,9 +130,6 @@ def get_spam_suggestions(words):
 
 
 def clean_json_response(text):
-    """
-    Remove markdown code fences if Gemini returns them.
-    """
 
     text = text.strip()
 
@@ -146,25 +155,8 @@ def clean_json_response(text):
     return text.strip()
 
 
-def safe_text(value):
-    """
-    Convert NaN/None to empty string.
-    """
-
-    if value is None:
-        return ""
-
-    try:
-        if pd.isna(value):
-            return ""
-    except Exception:
-        pass
-
-    return str(value).strip()
-
-
 # ============================================================
-# AI GENERATION
+# AI EMAIL GENERATION
 # ============================================================
 
 def generate_emails(
@@ -186,8 +178,8 @@ def generate_emails(
     prompt = f"""
 You are an expert B2B cold-email copywriter.
 
-Your job is to create two highly personalized cold-email
-variants for the prospect below.
+Create TWO genuinely personalized cold email variants
+for the prospect below.
 
 ==================================================
 PRODUCT / SERVICE
@@ -202,7 +194,7 @@ TARGET AUDIENCE
 {target_audience}
 
 ==================================================
-PROSPECT INFORMATION
+PROSPECT DETAILS
 ==================================================
 
 Name: {name}
@@ -213,85 +205,74 @@ Pain Point: {pain_point}
 Custom Note: {custom_note}
 
 ==================================================
-EMAIL STYLE
+TONE
 ==================================================
 
-Tone: {tone}
+{tone}
 
 ==================================================
-IMPORTANT RULES
+PERSONALIZATION RULES
 ==================================================
 
-1. Use ONLY the information supplied above.
+1. Use ONLY the prospect information provided above.
 
-2. NEVER invent:
-   - company achievements
-   - company news
-   - revenue
-   - customers
-   - technologies
-   - personal achievements
-   - events
-   - partnerships
-   - statistics
-   - facts that are not provided
+2. Never invent company news, achievements, revenue,
+   customers, technologies, statistics, events,
+   partnerships, or personal facts.
 
-3. Use the prospect's EXACT name.
+3. Use the prospect's exact name.
 
-4. Personalization is important.
-   Reference at least one specific prospect detail
-   in the first two sentences.
+4. Mention at least one specific prospect detail
+   within the first two sentences.
 
-5. The email should sound like a human B2B salesperson.
+5. Make the email sound natural and human.
 
-6. Keep each email concise.
+6. Keep the email concise.
 
-7. Do not make the email overly promotional.
+7. Avoid aggressive sales language.
 
-8. Avoid aggressive sales language.
+8. Do not use fake urgency.
 
-9. Avoid these spam-trigger expressions when possible:
-   free, guarantee, act now, limited time, urgent,
-   buy now, winner, risk free, 100%, click here,
-   special offer, cheap, make money, cash, sale,
-   discount, deal.
+9. Do not use the word "deal".
+   Use neutral phrases such as:
+   opportunity, conversation, option, or collaboration.
 
-10. Do not use the word "deal".
-    Prefer neutral phrases such as:
-    opportunity, conversation, option, or collaboration.
-
-11. Do not use fake urgency.
-
-12. Use a soft CTA.
+10. Avoid spam-trigger phrases such as:
+    free, guarantee, act now, limited time, urgent,
+    buy now, winner, risk free, 100%, click here,
+    special offer, cheap, make money, cash, sale,
+    discount.
 
 ==================================================
-A/B VARIANTS
+VARIANT A
 ==================================================
 
-Variant A:
 Pain-point focused.
-Connect the prospect's supplied pain point or context
-to the product/service.
 
-Variant B:
+Connect the supplied prospect pain point or context
+with the product/service.
+
+==================================================
+VARIANT B
+==================================================
+
 Curiosity/value focused.
-Create interest around a useful business outcome without
-making unsupported claims.
 
-The variants must be meaningfully different.
+Create interest around a useful business outcome.
 
 ==================================================
 SUBJECT LINES
 ==================================================
 
 For each variant provide:
-- one primary subject
-- two alternative subject lines
-- a simple open-rate potential score from 1-10
 
-The score is only a heuristic based on:
-- clarity
+- One main subject
+- Two alternative subject lines
+- A score from 1-10 for open-rate potential
+
+Score based on:
 - relevance
+- clarity
 - brevity
 - curiosity
 - personalization
@@ -346,17 +327,34 @@ Use exactly this structure:
 
 
 # ============================================================
+# API KEY CHECK
+# ============================================================
+
+if not GOOGLE_API_KEY:
+
+    st.error("❌ Gemini API key not found.")
+
+    st.code(
+        "GOOGLE_API_KEY=YOUR_GEMINI_API_KEY",
+        language="text"
+    )
+
+    st.info(
+        "Add your API key to the .env file and restart the app."
+    )
+
+    st.stop()
+
+
+# ============================================================
 # HEADER
 # ============================================================
 
 st.title("📧 AI Cold Email & Outreach Generator")
 
-st.markdown(
-    """
-Create personalized B2B cold emails using AI, generate two
-A/B variants, check spam-trigger words, edit and approve
-emails, and export the final campaign.
-"""
+st.write(
+    "Generate personalized cold emails with A/B variants, "
+    "spam checking, editing, approval, and export."
 )
 
 st.divider()
@@ -386,52 +384,21 @@ with st.sidebar:
     st.subheader("✨ Features")
 
     st.write("✅ Product & audience input")
-    st.write("✅ CSV prospect upload")
+    st.write("✅ CSV upload")
     st.write("✅ Manual prospect entry")
     st.write("✅ AI personalization")
     st.write("✅ A/B variants")
-    st.write("✅ Spam-trigger checker")
+    st.write("✅ Spam checker")
     st.write("✅ Spam suggestions")
-    st.write("✅ Subject line options")
+    st.write("✅ Subject alternatives")
     st.write("✅ Subject scoring")
-    st.write("✅ Email editor")
+    st.write("✅ Email editing")
     st.write("✅ Approval workflow")
     st.write("✅ CSV export")
-    st.write("✅ Copy-ready email")
-
-    st.divider()
-
-    st.caption(
-        "The spam checker is a simple MVP heuristic. "
-        "It flags risky language but does not automatically "
-        "block emails."
-    )
 
 
 # ============================================================
-# API KEY
-# ============================================================
-
-if not GOOGLE_API_KEY:
-
-    st.error(
-        "❌ Gemini API key not found."
-    )
-
-    st.code(
-        "GOOGLE_API_KEY=YOUR_GEMINI_API_KEY",
-        language="text"
-    )
-
-    st.info(
-        "Add the key to your .env file and restart Streamlit."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# 1. PRODUCT / SERVICE
+# 1. PRODUCT & TARGET AUDIENCE
 # ============================================================
 
 st.header("1️⃣ Product & Target Audience")
@@ -444,8 +411,9 @@ with col1:
         "Product / Service Description *",
         placeholder=(
             "Example:\n"
-            "We provide an AI sales assistant that researches "
-            "prospects and creates personalized outbound emails."
+            "We provide an AI-powered sales assistant that "
+            "researches prospects and creates personalized "
+            "outbound emails."
         ),
         height=180
     )
@@ -480,7 +448,7 @@ input_method = st.radio(
 
 
 # ============================================================
-# CSV INPUT
+# CSV UPLOAD
 # ============================================================
 
 if input_method == "📁 Upload CSV":
@@ -491,8 +459,8 @@ if input_method == "📁 Upload CSV":
         "Upload your prospect list",
         type=["csv"],
         help=(
-            "Required columns: name, company, role, industry. "
-            "Optional columns: pain_point, custom_note."
+            "Required: name, company, role, industry. "
+            "Optional: pain_point, custom_note."
         )
     )
 
@@ -502,7 +470,7 @@ if input_method == "📁 Upload CSV":
 
             df = pd.read_csv(uploaded_file)
 
-            # Normalize columns
+            # Normalize column names
             df.columns = [
                 str(column)
                 .strip()
@@ -527,7 +495,7 @@ if input_method == "📁 Upload CSV":
             if missing_columns:
 
                 st.error(
-                    "❌ Your CSV is missing: "
+                    "❌ Missing required columns: "
                     + ", ".join(missing_columns)
                 )
 
@@ -552,16 +520,17 @@ if input_method == "📁 Upload CSV":
                 ).reset_index(drop=True)
 
                 st.success(
-                    f"✅ {len(df)} prospects loaded."
+                    f"✅ {len(df)} prospects loaded successfully!"
                 )
 
                 with st.expander(
-                    "📄 View Prospect Data"
+                    "👥 View Prospect List"
                 ):
 
                     st.dataframe(
                         df,
-                        use_container_width=True
+                        use_container_width=True,
+                        height=300
                     )
 
         except Exception as e:
@@ -582,7 +551,7 @@ if input_method == "📁 Upload CSV":
             "📄 View CSV Format"
         ):
 
-            example = pd.DataFrame([
+            example_df = pd.DataFrame([
                 {
                     "name": "Priya Sharma",
                     "company": "FinEdge",
@@ -594,7 +563,7 @@ if input_method == "📁 Upload CSV":
             ])
 
             st.dataframe(
-                example,
+                example_df,
                 use_container_width=True
             )
 
@@ -602,7 +571,7 @@ if input_method == "📁 Upload CSV":
 
 
 # ============================================================
-# MANUAL INPUT
+# MANUAL ENTRY
 # ============================================================
 
 else:
@@ -610,9 +579,8 @@ else:
     st.subheader("✍️ Manual Prospect Entry")
 
     st.info(
-        "Enter the prospect information below and click "
-        "**Add Prospect**. You can add as many prospects "
-        "as you need."
+        "Enter prospect details and click "
+        "**Add Prospect**. You can add multiple prospects."
     )
 
     with st.form(
@@ -660,12 +628,12 @@ else:
                 height=100
             )
 
-        add_button = st.form_submit_button(
+        add_prospect = st.form_submit_button(
             "➕ Add Prospect",
             use_container_width=True
         )
 
-        if add_button:
+        if add_prospect:
 
             if not manual_name.strip():
 
@@ -712,7 +680,7 @@ else:
 
 
     # ========================================================
-    # MANUAL PROSPECT TABLE
+    # DISPLAY MANUAL PROSPECTS
     # ========================================================
 
     if st.session_state.manual_prospects:
@@ -730,13 +698,11 @@ else:
 
         st.dataframe(
             manual_df,
-            use_container_width=True
+            use_container_width=True,
+            height=250
         )
 
-        # ====================================================
-        # REMOVE PROSPECT
-        # ====================================================
-
+        # Remove prospect
         prospect_options = [
             f"{i + 1}. {p['name']} — {p['company']}"
             for i, p in enumerate(
@@ -793,7 +759,7 @@ else:
 
 
 # ============================================================
-# CHECK PROSPECTS
+# CHECK PROSPECT LIST
 # ============================================================
 
 if df.empty:
@@ -807,99 +773,110 @@ if df.empty:
 
 
 # ============================================================
-# 3. NUMBER OF PROSPECTS
+# 3. SELECT NUMBER OF PROSPECTS
 # ============================================================
 
 st.header("3️⃣ Select Prospects to Process")
 
 total_available = len(df)
 
-if total_available >= 20:
+st.write(
+    f"📊 **Total prospects available: {total_available}**"
+)
 
-    options = [
-        1,
-        5,
-        10,
-        15,
-        20,
-        "All"
-    ]
+# ------------------------------------------------------------
+# CREATE OPTIONS BASED ON TOTAL CSV / MANUAL PROSPECTS
+# ------------------------------------------------------------
 
-elif total_available >= 15:
+batch_options = []
 
-    options = [
-        1,
-        5,
-        10,
-        15,
-        "All"
-    ]
+# Standard batch sizes
+standard_sizes = [
+    5,
+    10,
+    15,
+    20,
+    25,
+    30,
+    35,
+    40,
+    45,
+    50
+]
 
-elif total_available >= 10:
+for size in standard_sizes:
 
-    options = [
-        1,
-        5,
-        10,
-        "All"
-    ]
+    if size < total_available:
+        batch_options.append(size)
 
-elif total_available >= 5:
+# Always include the exact number available
+batch_options.append(total_available)
 
-    options = [
-        1,
-        5,
-        "All"
-    ]
+# Remove duplicates and sort
+batch_options = sorted(
+    set(batch_options)
+)
+
+# ------------------------------------------------------------
+# DEFAULT TO 5 IF AVAILABLE
+# ------------------------------------------------------------
+
+if 5 in batch_options:
+
+    default_index = batch_options.index(5)
 
 else:
 
-    options = [
-        1,
-        "All"
-    ]
-
-
-default_index = (
-    options.index(5)
-    if 5 in options
-    else 0
-)
+    default_index = 0
 
 
 prospects_to_process = st.selectbox(
-    "Number of prospects to process",
-    options,
-    index=default_index
+    "How many prospects do you want to process?",
+    batch_options,
+    index=default_index,
+    help=(
+        "Choose how many prospects from your uploaded "
+        "or manually entered list should be processed."
+    )
 )
 
+# ------------------------------------------------------------
+# SELECT FIRST N PROSPECTS
+# ------------------------------------------------------------
 
-if prospects_to_process == "All":
+process_df = df.head(
+    int(prospects_to_process)
+).copy()
 
-    process_df = df.copy()
+st.success(
+    f"✅ **{len(process_df)}** prospect(s) selected "
+    f"out of **{total_available}** available."
+)
 
-else:
+# ------------------------------------------------------------
+# PREVIEW SELECTED PROSPECTS
+# ------------------------------------------------------------
 
-    process_df = df.head(
-        int(prospects_to_process)
+with st.expander(
+    "👥 View Selected Prospects"
+):
+
+    st.dataframe(
+        process_df,
+        use_container_width=True,
+        height=250
     )
 
 
-st.success(
-    f"✅ {len(process_df)} prospect(s) selected "
-    f"from {total_available} available."
-)
-
-
 # ============================================================
-# 4. GENERATE EMAILS
+# 4. AI EMAIL GENERATION
 # ============================================================
 
 st.header("4️⃣ AI Email Generation")
 
 st.caption(
-    "Two distinct personalized variants will be generated "
-    "for every selected prospect."
+    "Two different personalized email variants will be "
+    "generated for every selected prospect."
 )
 
 generate_button = st.button(
@@ -927,7 +904,7 @@ if generate_button:
 
         st.stop()
 
-    # Clear previous results
+    # Clear old results
     st.session_state.generated_results = []
 
     progress_bar = st.progress(0)
@@ -947,7 +924,7 @@ if generate_button:
         )
 
         status_text.info(
-            f"Generating for **{prospect_name}** "
+            f"Generating email for **{prospect_name}** "
             f"({index + 1}/{total})..."
         )
 
@@ -970,20 +947,20 @@ if generate_button:
                 {}
             )
 
-            body_a = safe_text(
-                variant_a.get("body")
-            )
-
-            body_b = safe_text(
-                variant_b.get("body")
-            )
-
             subject_a = safe_text(
                 variant_a.get("subject")
             )
 
+            body_a = safe_text(
+                variant_a.get("body")
+            )
+
             subject_b = safe_text(
                 variant_b.get("subject")
+            )
+
+            body_b = safe_text(
+                variant_b.get("body")
             )
 
             spam_a = check_spam(
@@ -1072,21 +1049,20 @@ if generate_button:
         except Exception as e:
 
             st.error(
-                f"❌ Generation failed for "
-                f"{prospect_name}: {str(e)}"
+                f"❌ Failed for {prospect_name}: {str(e)}"
             )
 
         progress_bar.progress(
             (index + 1) / total
         )
 
-        # Delay to reduce Gemini free-tier rate-limit risk
+        # Prevent sending requests too quickly
         if index < total - 1:
 
             time.sleep(4)
 
     status_text.success(
-        f"✅ Generation completed for {total} prospect(s)."
+        f"✅ Finished processing {total} prospect(s)."
     )
 
     time.sleep(1)
@@ -1095,7 +1071,7 @@ if generate_button:
 
 
 # ============================================================
-# 5. REVIEW / EDIT
+# 5. REVIEW, EDIT & APPROVE
 # ============================================================
 
 if st.session_state.generated_results:
@@ -1105,8 +1081,8 @@ if st.session_state.generated_results:
     st.header("5️⃣ Review, Edit & Approve")
 
     st.info(
-        "Review both variants. You can edit the subject "
-        "and email body before approving."
+        "Review both A/B variants, edit them if necessary, "
+        "select your preferred variant, and approve."
     )
 
     for i, result in enumerate(
@@ -1118,7 +1094,7 @@ if st.session_state.generated_results:
         )
 
         st.write(
-            f"**Role:** {result['role']}  |  "
+            f"**Role:** {result['role']}  | "
             f"**Industry:** {result['industry']}"
         )
 
@@ -1133,10 +1109,6 @@ if st.session_state.generated_results:
             st.write(
                 f"**Custom Note:** {result['custom_note']}"
             )
-
-        # ====================================================
-        # VARIANT COLUMNS
-        # ====================================================
 
         col_a, col_b = st.columns(2)
 
@@ -1163,11 +1135,9 @@ if st.session_state.generated_results:
                 key=f"body_a_{i}"
             )
 
-            # Save edits
             result["variant_a"]["subject"] = subject_a
             result["variant_a"]["body"] = body_a
 
-            # Subject options
             subject_options_a = result[
                 "variant_a"
             ].get(
@@ -1177,7 +1147,9 @@ if st.session_state.generated_results:
 
             if subject_options_a:
 
-                st.caption("Alternative Subject Lines")
+                st.caption(
+                    "Alternative Subject Lines"
+                )
 
                 for option in subject_options_a:
 
@@ -1197,7 +1169,7 @@ if st.session_state.generated_results:
                 f"{score_a}/10"
             )
 
-            # Spam checker
+            # Spam check
             spam_a = check_spam(
                 subject_a + " " + body_a
             )
@@ -1211,11 +1183,9 @@ if st.session_state.generated_results:
                     + ", ".join(spam_a)
                 )
 
-                suggestions_a = get_spam_suggestions(
+                for suggestion in get_spam_suggestions(
                     spam_a
-                )
-
-                for suggestion in suggestions_a:
+                ):
 
                     st.markdown(
                         "• " + suggestion
@@ -1228,7 +1198,6 @@ if st.session_state.generated_results:
                     "words detected."
                 )
 
-            # Copy-ready version
             st.caption(
                 "📋 Copy-ready email"
             )
@@ -1261,7 +1230,6 @@ if st.session_state.generated_results:
                 key=f"body_b_{i}"
             )
 
-            # Save edits
             result["variant_b"]["subject"] = subject_b
             result["variant_b"]["body"] = body_b
 
@@ -1274,7 +1242,9 @@ if st.session_state.generated_results:
 
             if subject_options_b:
 
-                st.caption("Alternative Subject Lines")
+                st.caption(
+                    "Alternative Subject Lines"
+                )
 
                 for option in subject_options_b:
 
@@ -1294,7 +1264,7 @@ if st.session_state.generated_results:
                 f"{score_b}/10"
             )
 
-            # Spam checker
+            # Spam check
             spam_b = check_spam(
                 subject_b + " " + body_b
             )
@@ -1308,11 +1278,9 @@ if st.session_state.generated_results:
                     + ", ".join(spam_b)
                 )
 
-                suggestions_b = get_spam_suggestions(
+                for suggestion in get_spam_suggestions(
                     spam_b
-                )
-
-                for suggestion in suggestions_b:
+                ):
 
                     st.markdown(
                         "• " + suggestion
@@ -1338,35 +1306,31 @@ if st.session_state.generated_results:
         # APPROVAL
         # ====================================================
 
-        st.markdown("### ✅ Approval")
+        st.markdown(
+            "### ✅ Select & Approve"
+        )
 
-        approval_col1, approval_col2 = st.columns(2)
+        selected_variant = st.radio(
+            "Choose the variant to export",
+            ["A", "B"],
+            index=(
+                0
+                if result["approved_variant"] == "A"
+                else 1
+            ),
+            horizontal=True,
+            key=f"variant_choice_{i}"
+        )
 
-        with approval_col1:
+        result["approved_variant"] = selected_variant
 
-            selected_variant = st.radio(
-                "Choose variant",
-                ["A", "B"],
-                index=(
-                    0
-                    if result["approved_variant"] == "A"
-                    else 1
-                ),
-                horizontal=True,
-                key=f"variant_choice_{i}"
-            )
+        approved = st.checkbox(
+            "Approve this email",
+            value=result["approved"],
+            key=f"approved_{i}"
+        )
 
-            result["approved_variant"] = selected_variant
-
-        with approval_col2:
-
-            approved = st.checkbox(
-                "Approve this email",
-                value=result["approved"],
-                key=f"approved_{i}"
-            )
-
-            result["approved"] = approved
+        result["approved"] = approved
 
         if approved:
 
@@ -1378,8 +1342,7 @@ if st.session_state.generated_results:
         else:
 
             st.info(
-                "This prospect's email has not "
-                "been approved yet."
+                "This prospect has not been approved yet."
             )
 
         st.divider()
@@ -1391,7 +1354,7 @@ if st.session_state.generated_results:
 
 if st.session_state.generated_results:
 
-    st.header("6️⃣ Export & Copy")
+    st.header("6️⃣ Export Approved Emails")
 
     approved_rows = []
 
@@ -1434,7 +1397,7 @@ if st.session_state.generated_results:
 
         st.success(
             f"✅ {len(approved_rows)} approved "
-            "email(s) ready."
+            "email(s) ready for export."
         )
 
         st.dataframe(
@@ -1442,10 +1405,7 @@ if st.session_state.generated_results:
             use_container_width=True
         )
 
-        # ====================================================
-        # CSV EXPORT
-        # ====================================================
-
+        # CSV
         csv_data = approved_df.to_csv(
             index=False
         ).encode("utf-8")
@@ -1458,10 +1418,7 @@ if st.session_state.generated_results:
             use_container_width=True
         )
 
-        # ====================================================
-        # COPY ALL APPROVED EMAILS
-        # ====================================================
-
+        # Copy-ready output
         st.subheader(
             "📋 Copy Approved Emails"
         )
@@ -1475,8 +1432,8 @@ if st.session_state.generated_results:
                 f"Company: {row['company']}\n"
                 f"Variant: {row['selected_variant']}\n"
                 f"Subject: {row['subject']}\n\n"
-                f"{row['email_body']}\n"
-                f"\n{'-' * 60}\n\n"
+                f"{row['email_body']}\n\n"
+                f"{'-' * 60}\n\n"
             )
 
         st.code(
@@ -1485,8 +1442,8 @@ if st.session_state.generated_results:
         )
 
         st.caption(
-            "Use the copy button on the code block to "
-            "copy the approved emails."
+            "Use the copy button on the code block "
+            "to copy the approved emails."
         )
 
     else:
@@ -1497,14 +1454,14 @@ if st.session_state.generated_results:
 
 
 # ============================================================
-# 7. MOCK ANALYTICS
+# 7. CAMPAIGN SUMMARY
 # ============================================================
 
 if st.session_state.generated_results:
 
     st.divider()
 
-    st.header("7️⃣ Campaign Analytics")
+    st.header("📊 Campaign Summary")
 
     total_generated = len(
         st.session_state.generated_results
@@ -1560,13 +1517,13 @@ if st.session_state.generated_results:
         )
 
     st.caption(
-        "Analytics shown here are campaign workflow "
-        "metrics, not actual open/reply results."
+        "These are workflow metrics, not actual email "
+        "open or reply results."
     )
 
 
 # ============================================================
-# 8. PROJECT INFORMATION
+# ABOUT
 # ============================================================
 
 st.divider()
@@ -1577,27 +1534,26 @@ with st.expander(
 
     st.write(
         """
-        **AI Cold Email & Outreach Generator**
+        AI Cold Email & Outreach Generator
 
-        This application helps sales teams and founders:
+        This application allows users to:
 
-        • Describe their product/service  
-        • Define their target audience  
-        • Upload prospect lists using CSV  
-        • Enter prospects manually  
-        • Generate personalized emails with AI  
-        • Create two A/B variants  
-        • Check for spam-trigger language  
-        • Edit generated emails  
-        • Approve selected variants  
-        • Export approved emails as CSV  
-        • Copy emails for use in an external email system  
+        • Describe a product or service
+        • Define the target audience
+        • Upload prospect lists using CSV
+        • Add prospects manually
+        • Generate personalized cold emails
+        • Create two A/B variants
+        • Check for spam-trigger language
+        • Edit generated emails
+        • Approve a selected variant
+        • Export approved emails as CSV
+        • Copy approved emails for external use
 
         The application does not automatically send emails.
         """
     )
 
 st.caption(
-    "📧 AI Cold Email & Outreach Generator | "
-    "Personalization • A/B Testing • Spam Checking • Export"
+    "📧 AI Cold Email & Outreach Generator"
 )
